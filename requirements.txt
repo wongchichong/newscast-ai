@@ -1,0 +1,11 @@
+anthropic>=0.40.0
+edge-tts>=7.0.0
+trafilatura>=1.6.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+pillow>=10.0.0
+yt-dlp>=2024.1.0
+playwright>=1.40.0
+kokoro-onnx>=0.4.0
+soundfile>=0.12.0
+numpy>=1.24.0

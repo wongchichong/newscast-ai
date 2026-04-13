@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual env
+venv/
+.env
+
+# Large binary files
+voices-v1.0.bin
+*.onnx
+
+# Output and temp
+output/
+temp/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
