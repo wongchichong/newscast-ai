@@ -11,6 +11,10 @@ import time
 import uuid
 from pathlib import Path
 
+# Disable ONNX runtime thread affinity which breaks in PRoot containers
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+
 # Add tools dir to path
 sys.path.insert(0, str(Path(__file__).parent))
 

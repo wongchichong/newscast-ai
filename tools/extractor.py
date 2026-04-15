@@ -16,40 +16,76 @@ TEMP_DIR = Path(__file__).parent.parent / "temp"
 
 def find_embedded_videos(html: str, base_url: str) -> list[str]:
     """Find video URLs embedded in a page (YouTube, Vimeo, direct mp4, etc.)."""
+    from urllib.parse import urljoin
     soup = BeautifulSoup(html, "html.parser")
     videos = []
 
-    # iframes (YouTube, Vimeo, etc.)
+    # 1. iframes (YouTube, Vimeo, etc.)
     for iframe in soup.find_all("iframe"):
         src = iframe.get("src", "")
-        if any(x in src for x in ["youtube", "vimeo", "dailymotion", "twitter", "tiktok"]):
+        if not src:
+            src = iframe.get("data-src", "")
+        if not src:
+            continue
+        # Normalize URLs
+        if not src.startswith("http"):
+            src = urljoin(base_url, src)
+        if any(x in src.lower() for x in ["youtube", "vimeo", "dailymotion", "twitter", "tiktok", "facebook.com"]):
             # Normalize YouTube embed URLs
-            src = src.replace("//www.youtube.com/embed/", "//www.youtube.com/watch?v=")
             src = re.sub(r"//www\.youtube\.com/embed/([^?/]+)", r"//www.youtube.com/watch?v=\1", src)
-            if not src.startswith("http"):
-                src = "https:" + src
+            src = re.sub(r"//youtube\.com/embed/([^?/]+)", r"//www.youtube.com/watch?v=\1", src)
             videos.append(src)
 
-    # Direct video tags
+    # 2. Direct video tags
     for video in soup.find_all("video"):
         for src_tag in video.find_all("source"):
-            src = src_tag.get("src", "")
+            src = src_tag.get("src") or src_tag.get("data-src", "")
             if src:
                 if not src.startswith("http"):
-                    from urllib.parse import urljoin
                     src = urljoin(base_url, src)
                 videos.append(src)
-        src = video.get("src", "")
+        src = video.get("src") or video.get("data-src", "")
         if src:
             if not src.startswith("http"):
-                from urllib.parse import urljoin
                 src = urljoin(base_url, src)
             videos.append(src)
 
-    # data-video-id attributes (common in news sites)
+    # 3. data-video-id attributes (common in news sites)
     for tag in soup.find_all(attrs={"data-video-id": True}):
         vid_id = tag["data-video-id"]
-        videos.append(f"https://www.youtube.com/watch?v={vid_id}")
+        if vid_id and len(vid_id) > 5:
+            videos.append(f"https://www.youtube.com/watch?v={vid_id}")
+
+    # 4. JSON-LD structured data (VideoObject)
+    for script_tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script_tag.string)
+            if isinstance(data, dict) and data.get("@type") == "VideoObject":
+                content_url = data.get("contentUrl") or data.get("embedUrl", "")
+                if content_url:
+                    videos.append(content_url)
+            elif isinstance(data, dict):
+                # Check nested objects
+                for key, val in data.items():
+                    if isinstance(val, dict) and val.get("@type") == "VideoObject":
+                        content_url = val.get("contentUrl") or val.get("embedUrl", "")
+                        if content_url:
+                            videos.append(content_url)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    # 5. Look for video URLs in data attributes or inline scripts
+    video_patterns = [
+        r'https?://[^\s"\']+\.mp4[^\s"\']*',
+        r'https?://[^\s"\']+\.m3u8[^\s"\']*',
+    ]
+    for pattern in video_patterns:
+        matches = re.findall(pattern, html)
+        for m in matches:
+            # Clean up URL
+            m = m.rstrip(')"\'')
+            if m not in videos:
+                videos.append(m)
 
     return list(dict.fromkeys(videos))  # deduplicate preserving order
 
@@ -66,34 +102,44 @@ def download_video(url: str, output_path: Path, max_duration_sec: int = 120) -> 
         "yt-dlp",
         "--no-playlist",
         "--max-downloads", "1",
-        "--match-filter", f"duration < {max_duration_sec}",
-        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]",
+        "-f", "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best",
         "--merge-output-format", "mp4",
         "-o", out_template,
         "--write-info-json",
         "--no-warnings",
+        "--socket-timeout", "15",
+        "--retries", "3",
         url
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
 
     # Find the downloaded file
     parent = output_path.parent
-    downloaded = list(parent.glob("*.mp4"))
+    downloaded = list(parent.glob("*.mp4")) + list(parent.glob("*.mkv"))
     info_files = list(parent.glob("*.info.json"))
 
     metadata = {}
     if info_files:
-        with open(info_files[0]) as f:
-            raw = json.load(f)
-            metadata = {
-                "title": raw.get("title", ""),
-                "duration": raw.get("duration", 0),
-                "description": raw.get("description", "")[:500],
-                "uploader": raw.get("uploader", ""),
-            }
+        try:
+            with open(info_files[0]) as f:
+                raw = json.load(f)
+                metadata = {
+                    "title": raw.get("title", ""),
+                    "duration": raw.get("duration", 0),
+                    "description": raw.get("description", "")[:500],
+                    "uploader": raw.get("uploader", ""),
+                }
+        except Exception:
+            pass
 
     if downloaded:
+        # Clean up info json
+        for info_file in info_files:
+            try:
+                info_file.unlink()
+            except Exception:
+                pass
         return {
             "success": True,
             "path": str(downloaded[0]),
@@ -103,7 +149,7 @@ def download_video(url: str, output_path: Path, max_duration_sec: int = 120) -> 
     else:
         return {
             "success": False,
-            "error": result.stderr[-300:] if result.stderr else "Unknown error",
+            "error": result.stderr[-300:] if result.stderr else "No video downloaded",
             "url": url,
         }
 

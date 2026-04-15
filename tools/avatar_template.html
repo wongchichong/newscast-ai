@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1920px; height: 1080px; overflow: hidden;
+    background: #0a0e1a;
+    font-family: 'Arial', sans-serif;
+    color: #fff;
+  }
+
+  /* Background gradient */
+  .bg {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 20% 50%, #0d1f3c 0%, #060b14 60%);
+  }
+
+  /* Animated grid lines */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,120,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,120,255,0.04) 1px, transparent 1px);
+    background-size: 80px 80px;
+    animation: gridMove 8s linear infinite;
+  }
+  @keyframes gridMove { from { background-position: 0 0; } to { background-position: 80px 80px; } }
+
+  /* Globe/world map background */
+  .globe {
+    position: absolute;
+    right: -80px; top: 50%;
+    transform: translateY(-50%);
+    width: 900px; height: 900px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 35% 40%, rgba(0,80,200,0.3), transparent 60%),
+      radial-gradient(circle at 65% 60%, rgba(0,160,255,0.15), transparent 50%);
+    border: 1px solid rgba(0,120,255,0.2);
+    box-shadow:
+      0 0 80px rgba(0,100,255,0.15),
+      inset 0 0 120px rgba(0,50,150,0.3);
+    animation: globeSpin 20s linear infinite;
+  }
+  @keyframes globeSpin {
+    0% { box-shadow: 0 0 80px rgba(0,100,255,0.15), inset 0 0 120px rgba(0,50,150,0.3); }
+    50% { box-shadow: 0 0 120px rgba(0,150,255,0.25), inset 0 0 150px rgba(0,80,200,0.4); }
+    100% { box-shadow: 0 0 80px rgba(0,100,255,0.15), inset 0 0 120px rgba(0,50,150,0.3); }
+  }
+
+  /* Avatar area */
+  .avatar-area {
+    position: absolute;
+    left: 80px; top: 50%;
+    transform: translateY(-50%);
+    width: 520px; height: 700px;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+
+  /* Silhouette anchor */
+  .anchor {
+    width: 440px; height: 620px;
+    position: relative;
+  }
+  .anchor-body {
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 300px; height: 480px;
+    background: linear-gradient(180deg, #1a2a4a 0%, #0d1830 100%);
+    border-radius: 150px 150px 20px 20px;
+    box-shadow: 0 0 40px rgba(0,100,255,0.2);
+  }
+  .anchor-suit {
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 340px; height: 380px;
+    background: linear-gradient(180deg, #1c2e50 0%, #0e1c38 100%);
+    border-radius: 20px 20px 0 0;
+  }
+  .anchor-tie {
+    position: absolute;
+    bottom: 200px; left: 50%;
+    transform: translateX(-50%);
+    width: 40px; height: 160px;
+    background: linear-gradient(180deg, #c00 0%, #900 100%);
+    clip-path: polygon(20% 0%, 80% 0%, 100% 100%, 50% 85%, 0% 100%);
+  }
+  .anchor-head {
+    position: absolute;
+    bottom: 400px; left: 50%;
+    transform: translateX(-50%);
+    width: 180px; height: 200px;
+    background: linear-gradient(180deg, #d4956a 0%, #c07a50 100%);
+    border-radius: 50% 50% 45% 45%;
+    box-shadow: 0 0 20px rgba(0,0,0,0.3);
+  }
+  .anchor-hair {
+    position: absolute;
+    top: -10px; left: 0; right: 0;
+    height: 80px;
+    background: #2a1a0a;
+    border-radius: 50% 50% 0 0;
+  }
+  /* Talking mouth animation */
+  .anchor-mouth {
+    position: absolute;
+    bottom: 35px; left: 50%;
+    transform: translateX(-50%);
+    width: 50px; height: 12px;
+    background: #8a4a35;
+    border-radius: 0 0 20px 20px;
+    animation: talk 0.25s ease-in-out infinite alternate;
+  }
+  @keyframes talk {
+    from { height: 8px; }
+    to { height: 20px; }
+  }
+  .anchor-eyes {
+    position: absolute;
+    top: 70px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 40px;
+  }
+  .eye {
+    width: 22px; height: 16px;
+    background: #1a0a00;
+    border-radius: 50%;
+    animation: blink 4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%,45%,55%,100% { transform: scaleY(1); }
+    50% { transform: scaleY(0.1); }
+  }
+  /* Desk */
+  .desk {
+    position: absolute;
+    bottom: 40px; left: 20px;
+    width: 500px; height: 100px;
+    background: linear-gradient(180deg, #1e3060 0%, #0e1c40 100%);
+    border-radius: 20px 20px 0 0;
+    border-top: 2px solid rgba(0,120,255,0.5);
+    box-shadow: 0 -10px 40px rgba(0,80,200,0.2);
+  }
+  /* Desk logo */
+  .desk-logo {
+    position: absolute;
+    bottom: 56px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 22px; font-weight: 900;
+    color: #fff;
+    letter-spacing: 3px;
+    text-shadow: 0 0 20px rgba(0,150,255,0.8);
+  }
+  .desk-logo span { color: #ff3333; }
+
+  /* Content area */
+  .content {
+    position: absolute;
+    left: 640px; top: 80px;
+    right: 120px; bottom: 180px;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    gap: 30px;
+  }
+
+  /* Country badge */
+  .country-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0,100,255,0.2);
+    border: 1px solid rgba(0,150,255,0.4);
+    border-radius: 4px;
+    padding: 8px 20px;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: #5af;
+    text-transform: uppercase;
+    width: fit-content;
+  }
+  .country-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #5af;
+    animation: pulse 1s ease-in-out infinite alternate;
+  }
+  @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
+
+  /* Headline */
+  .headline {
+    font-size: 42px;
+    font-weight: 900;
+    line-height: 1.2;
+    color: #fff;
+    text-shadow: 0 2px 20px rgba(0,80,200,0.5);
+    max-width: 960px;
+  }
+
+  /* Subtitle / speech text */
+  .speech-box {
+    background: rgba(0,0,0,0.5);
+    border-left: 4px solid #0af;
+    border-radius: 0 8px 8px 0;
+    padding: 20px 28px;
+    max-width: 960px;
+  }
+  .speech-text {
+    font-size: 30px;
+    line-height: 1.5;
+    color: #e8e8e8;
+    font-style: italic;
+  }
+
+  /* Source attribution */
+  .source-line {
+    font-size: 22px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 1px;
+  }
+  .source-line span { color: #0af; }
+
+  /* Lower third bar */
+  .lower-bar {
+    position: absolute;
+    bottom: 60px; left: 0; right: 0;
+    height: 60px;
+    background: linear-gradient(90deg, #cc0000 0%, #990000 100%);
+    display: flex; align-items: center;
+    padding: 0 80px;
+    gap: 40px;
+  }
+  .lower-title {
+    font-size: 26px; font-weight: 900;
+    letter-spacing: 2px; color: #fff;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .lower-sep {
+    width: 2px; height: 30px;
+    background: rgba(255,255,255,0.4);
+  }
+  .lower-subtitle {
+    font-size: 22px; color: rgba(255,255,255,0.9);
+    white-space: nowrap; overflow: hidden;
+  }
+
+  /* Live indicator */
+  .live-badge {
+    position: absolute;
+    top: 40px; right: 120px;
+    background: #cc0000;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 900;
+    letter-spacing: 3px;
+    padding: 8px 18px;
+    border-radius: 4px;
+    animation: livePulse 1s ease-in-out infinite alternate;
+  }
+  @keyframes livePulse {
+    from { opacity: 0.8; }
+    to { opacity: 1; box-shadow: 0 0 15px rgba(255,0,0,0.6); }
+  }
+
+  /* Scan line effect */
+  .scanlines {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0,0,0,0.03) 3px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="grid"></div>
+<div class="globe"></div>
+
+<!-- Anchor avatar -->
+<div class="avatar-area">
+  <div class="anchor">
+    <div class="anchor-body"></div>
+    <div class="anchor-suit">
+      <div class="anchor-tie"></div>
+    </div>
+    <div class="anchor-head">
+      <div class="anchor-hair"></div>
+      <div class="anchor-eyes">
+        <div class="eye"></div>
+        <div class="eye"></div>
+      </div>
+      <div class="anchor-mouth"></div>
+    </div>
+  </div>
+  <div class="desk">
+    <div class="desk-logo">NEWS<span>CAST</span>AI</div>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+  <div class="country-badge" id="countryBadge">
+    <div class="country-dot"></div>
+    <span id="countryText">GLOBAL</span>
+  </div>
+  <div class="headline" id="headlineText">BREAKING NEWS</div>
+  <div class="speech-box">
+    <div class="speech-text" id="speechText">Loading...</div>
+  </div>
+  <div class="source-line">SOURCE: <span id="sourceText">NewscastAI Global Desk</span></div>
+</div>
+
+<!-- Live badge -->
+<div class="live-badge">● LIVE</div>
+
+<!-- Lower bar -->
+<div class="lower-bar">
+  <div class="lower-title" id="lowerTitle">GLOBAL NEWS</div>
+  <div class="lower-sep"></div>
+  <div class="lower-subtitle" id="lowerSubtitle">NewscastAI Global Desk</div>
+</div>
+
+<div class="scanlines"></div>
+
+<script>
+  // Populated by pipeline
+  const DATA = window.__AVATAR_DATA__ || {};
+  document.getElementById('headlineText').textContent = DATA.headline || 'Breaking News';
+  document.getElementById('countryText').textContent  = DATA.country || 'GLOBAL';
+  document.getElementById('sourceText').textContent   = DATA.source  || 'NewscastAI Global Desk';
+  document.getElementById('lowerTitle').textContent   = DATA.lower_title  || 'GLOBAL NEWS';
+  document.getElementById('lowerSubtitle').textContent = DATA.lower_subtitle || 'NewscastAI Global Desk';
+
+  // Word-by-word subtitle animation
+  const fullText = DATA.speech_text || '';
+  const words = fullText.split(' ');
+  const el = document.getElementById('speechText');
+  const totalDuration = (DATA.duration || 30) * 1000;
+  const msPerWord = totalDuration / Math.max(words.length, 1);
+  let current = 0;
+
+  function showWords() {
+    const chunkSize = Math.max(1, Math.floor(8 + Math.random() * 5)); // 8-12 words at a time
+    const end = Math.min(current + chunkSize, words.length);
+    el.textContent = words.slice(Math.max(0, end - 12), end).join(' ');
+    current = end;
+    if (current < words.length) {
+      setTimeout(showWords, msPerWord * chunkSize);
+    }
+  }
+  if (words.length > 0) showWords();
+</script>
+</body>
+</html>

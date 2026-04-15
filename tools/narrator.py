@@ -40,6 +40,11 @@ def _get_kokoro():
         raise FileNotFoundError(f"Kokoro model not found: {KOKORO_MODEL}")
     if not KOKORO_VOICES.exists():
         raise FileNotFoundError(f"Kokoro voices not found: {KOKORO_VOICES}")
+
+    # Disable ONNX runtime thread affinity which breaks in PRoot containers
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OMP_WAIT_POLICY"] = "PASSIVE"
+
     from kokoro_onnx import Kokoro
     print(f"[narrator] Loading Kokoro model: {KOKORO_MODEL.name}")
     _kokoro_instance = Kokoro(str(KOKORO_MODEL), str(KOKORO_VOICES))
@@ -47,7 +52,7 @@ def _get_kokoro():
 
 
 def _tts_kokoro(text: str, output_path: Path, voice_key: str = "male_us",
-                speed: float = 0.82) -> Path:
+                speed: float = 1.0) -> Path:
     """
     Generate TTS with Kokoro ONNX. Saves as WAV then converts to MP3 via ffmpeg.
     speed < 1.0 = slightly slower (better for news broadcast style).
@@ -96,7 +101,7 @@ def generate_narration(
     text: str,
     output_path: Path,
     voice_key: str = "male_us",
-    speed: float = 0.82,
+    speed: float = 1.0,
 ) -> Path:
     """
     Generate narration audio from text.

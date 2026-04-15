@@ -21,43 +21,44 @@ OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
 
 def fetch_article(url: str) -> dict:
-    """Fetch article text and metadata from a URL."""
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; NewscastBot/1.0)"}
-    resp = requests.get(url, headers=headers, timeout=15)
+    """Fetch article text and metadata from a URL.
+
+    Uses requests first, then falls back to Playwright for JS-heavy pages
+    where trafilatura extracts insufficient text.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; NewscastBot/1.0)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+    resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
     resp.raise_for_status()
     html = resp.text
 
-    # Extract clean text
-    text = trafilatura.extract(html, include_comments=False, include_tables=False)
+    # Extract clean text with trafilatura
+    text = trafilatura.extract(html, include_comments=False, include_tables=True)
 
     # Extract metadata via BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
-    title = ""
-    for sel in ["h1", 'meta[property="og:title"]', "title"]:
-        tag = soup.select_one(sel)
-        if tag:
-            title = tag.get("content", "") or tag.get_text(strip=True)
-            if title:
-                break
+    title = _extract_title(soup)
+    description = _extract_description(soup)
+    images = _extract_images(soup, html, resp.url)
 
-    description = ""
-    meta_desc = soup.select_one('meta[name="description"], meta[property="og:description"]')
-    if meta_desc:
-        description = meta_desc.get("content", "")
-
-    # Extract image URLs
-    images = []
-    for img in soup.select("article img, .content img, main img")[:8]:
-        src = img.get("src") or img.get("data-src", "")
-        if src and src.startswith("http"):
-            images.append(src)
-
-    og_image = soup.select_one('meta[property="og:image"]')
-    if og_image:
-        images.insert(0, og_image.get("content", ""))
+    # If trafilatura got very little text, try Playwright for JS-rendered content
+    if not text or len(text) < 200:
+        print(f"  [scraper] Low text yield ({len(text) or 0} chars) — trying Playwright...")
+        try:
+            pw_result = _scrape_with_playwright(url, timeout=20)
+            if pw_result and len(pw_result.get("text", "")) > len(text or ""):
+                text = pw_result["text"]
+                title = title or pw_result.get("title", "")
+                html = pw_result.get("html", html)
+                print(f"  [scraper] Playwright improved text to {len(text)} chars")
+        except Exception as e:
+            print(f"  [scraper] Playwright fallback failed: {e}")
 
     return {
-        "url": url,
+        "url": resp.url,  # use final URL after redirects
         "title": title,
         "description": description,
         "text": text or "",
@@ -66,15 +67,182 @@ def fetch_article(url: str) -> dict:
     }
 
 
-def download_image(url: str, dest: Path) -> Optional[Path]:
-    """Download an image to a local path."""
+def _extract_title(soup: BeautifulSoup) -> str:
+    """Extract the best title from HTML, trying multiple strategies."""
+    # Priority: og:title > article headline > h1 > <title>
+    selectors = [
+        'meta[property="og:title"]',
+        'meta[name="twitter:title"]',
+        "article h1",
+        "h1.headline",
+        "h1.article-title",
+        "h1",
+        "title",
+    ]
+    for sel in selectors:
+        tag = soup.select_one(sel)
+        if tag:
+            title = tag.get("content", "") or tag.get_text(strip=True)
+            if title and len(title) > 3:
+                return title.strip()
+    return ""
+
+
+def _extract_description(soup: BeautifulSoup) -> str:
+    """Extract the best description/summary from HTML."""
+    selectors = [
+        'meta[property="og:description"]',
+        'meta[name="description"]',
+        'meta[name="twitter:description"]',
+        "article .summary",
+        "p.deck",
+        "p.subtitle",
+    ]
+    for sel in selectors:
+        tag = soup.select_one(sel)
+        if tag:
+            desc = tag.get("content", "") or tag.get_text(strip=True)
+            if desc and len(desc) > 10:
+                return desc.strip()
+    return ""
+
+
+def _extract_images(soup: BeautifulSoup, html: str, base_url: str) -> list[str]:
+    """Extract relevant article images with multiple strategies."""
+    from urllib.parse import urljoin
+
+    images = []
+
+    # 1. OG image (highest priority)
+    og_image = soup.select_one('meta[property="og:image"]')
+    if og_image:
+        src = og_image.get("content", "")
+        if src:
+            images.append(src if src.startswith("http") else urljoin(base_url, src))
+
+    # 2. Twitter card image
+    twitter_img = soup.select_one('meta[name="twitter:image"]')
+    if twitter_img:
+        src = twitter_img.get("content", "")
+        if src:
+            images.append(src if src.startswith("http") else urljoin(base_url, src))
+
+    # 3. Images inside article/content containers
+    seen = set(images)
+    for img in soup.select("article img, .content img, main img, .article-body img, .story-body img"):
+        src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
+        if src and src.startswith("http") and src not in seen:
+            # Skip tiny icons/pixels
+            width = img.get("width", "")
+            height = img.get("height", "")
+            if width and int(width) < 50:
+                continue
+            images.append(src)
+            seen.add(src)
+            if len(images) >= 5:
+                break
+
+    return images[:5]
+
+
+def _scrape_with_playwright(url: str, timeout: int = 20) -> dict | None:
+    """Use Playwright to render JS-heavy pages and extract content."""
+    import asyncio
+    from playwright.async_api import async_playwright
+
+    async def _run():
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+            )
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                user_agent="Mozilla/5.0 (compatible; NewscastBot/1.0)",
+            )
+            page = await context.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(3000)
+
+            # Extract text from main content area
+            text = await page.evaluate("""() => {
+                const selectors = ['article', '[role="article"]', 'main', '.article-body',
+                    '.story-body', '.content', '#content', '.post-content'];
+                for (const s of selectors) {
+                    const el = document.querySelector(s);
+                    if (el && el.innerText && el.innerText.trim().length > 200)
+                        return el.innerText.trim();
+                }
+                // Fallback: body text minus nav/footer
+                const clone = document.body.cloneNode(true);
+                for (const t of ['nav', 'footer', 'aside', 'script', 'style', 'header',
+                                 '.ad', '.banner', '.sidebar', '[class*="cookie"]'])
+                    clone.querySelectorAll(t).forEach(n => n.remove());
+                return clone.innerText.trim().slice(0, 10000);
+            }""")
+
+            title = await page.title()
+            try:
+                og = await page.locator('meta[property="og:title"]').get_attribute("content", timeout=500)
+                if og:
+                    title = og
+            except Exception:
+                pass
+
+            html_content = await page.content()
+            await context.close()
+            await browser.close()
+            return {"text": text, "title": title, "html": html_content}
+
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(url, headers=headers, timeout=10, stream=True)
+        return asyncio.run(_run())
+    except Exception:
+        return None
+
+
+def download_image(url: str, dest: Path) -> Optional[Path]:
+    """Download an image to a local path. Handles redirects and validates content."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            "Referer": url.split("/")[0] + "//" + url.split("/")[2] if len(url.split("/")) > 2 else "",
+        }
+        resp = requests.get(url, headers=headers, timeout=15, stream=True, allow_redirects=True)
         resp.raise_for_status()
+
+        # Validate content type
+        content_type = resp.headers.get("Content-Type", "")
+        if content_type and not content_type.startswith("image/"):
+            # Try to detect from magic bytes
+            first_bytes = next(resp.iter_content(8))
+            if not (first_bytes.startswith(b'\xff\xd8') or  # JPEG
+                    first_bytes.startswith(b'\x89PNG') or   # PNG
+                    first_bytes.startswith(b'RIFF')):       # WebP
+                return None
+
         with open(dest, "wb") as f:
             for chunk in resp.iter_content(8192):
                 f.write(chunk)
+
+        # Validate file is not empty or too small
+        if dest.stat().st_size < 1000:
+            dest.unlink(missing_ok=True)
+            return None
+
+        # Convert WebP to JPEG for broader compatibility
+        if url.lower().endswith(".webp") or content_type == "image/webp":
+            img = Image.open(dest)
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+            jpeg_dest = dest.with_suffix(".jpg")
+            img.save(jpeg_dest, "JPEG", quality=85)
+            dest.unlink()
+            return jpeg_dest
+
         return dest
     except Exception as e:
         print(f"  [scraper] image download failed: {e}")

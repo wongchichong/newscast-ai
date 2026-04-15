@@ -38,6 +38,9 @@ SCHEMA_EXAMPLE = {
             {"aspect": "Government stance", "us": "...", "uk": "...", "cn": "..."}
         ]
     },
+    "perspective_differences": [
+        {"aspect": "Cause attribution", "description": "...", "countries_involved": ["US", "CN"]}
+    ],
     "key_facts": ["...", "..."],
     "lower_third_title": "AI NEWS: GLOBAL PERSPECTIVES",
     "lower_third_name": "NewscastAI Global Desk",
@@ -47,16 +50,29 @@ SCHEMA_EXAMPLE = {
 # ── Build LLM prompt ──────────────────────────────────────────────────────────
 
 def _build_prompt(category: str, articles: list[dict], target_duration: int) -> str:
+    # Figure out which languages appear
+    langs_present = list({
+        a.get("lang_name", a.get("language", "English"))
+        for a in articles
+        if a.get("lang_name") or a.get("language")
+    })
+    has_non_english = any(
+        a.get("language", "en") not in ("en", "en-US", "")
+        for a in articles
+    )
+
     # Format articles for the prompt
     article_blocks = []
     for i, a in enumerate(articles):
         country = a.get("country_name", a.get("country", "Unknown"))
         title = a.get("title", "")
         source = a.get("source", "")
-        url = a.get("url", "")
+        lang = a.get("lang_name") or a.get("language") or "English"
+        # Prefer resolved URL (actual article) over raw Google News redirect URL
+        url = a.get("resolved_url") or a.get("url", "")
         text = (a.get("text") or "")[:800]  # truncate to save tokens
         article_blocks.append(
-            f"[Article {i+1} — {country} / {source}]\n"
+            f"[Article {i+1} — {country} / {source} / Language: {lang}]\n"
             f"Title: {title}\n"
             f"URL: {url}\n"
             f"Text: {text}\n"
@@ -71,15 +87,32 @@ def _build_prompt(category: str, articles: list[dict], target_duration: int) -> 
     target_words = int(target_duration * 2.5)
     words_per_segment = max(40, target_words // max(len(articles) + 3, 6))
 
-    prompt = f"""You are a global news editor producing a broadcast-style newscast.
+    multilang_note = ""
+    if has_non_english:
+        multilang_note = f"""
+IMPORTANT — MULTILINGUAL SOURCES:
+Some articles above are in non-English languages ({", ".join(langs_present)}).
+You MUST translate their content into English for all narration text.
+Preserve the original framing and emphasis of each source — do not westernize or sanitize the perspective.
+State-controlled or government-aligned media (e.g. Xinhua, TASS, RT) should be reported as-is with a note about the outlet's perspective.
+"""
+
+    prompt = f"""You are a global news editor producing an internationally balanced broadcast-style newscast.
 
 Topic: {category}
 
-You have {len(articles)} articles from these countries: {", ".join(countries_in_articles)}.
-
+You have {len(articles)} articles from {len(countries_in_articles)} countries: {", ".join(countries_in_articles)}.
+{multilang_note}
 ---
 {articles_text}
 ---
+
+Your goal is NOT just to summarize the news — it is to COMPARE and CONTRAST how different countries and cultures frame this topic.
+Actively look for:
+- Where countries AGREE on the facts but DISAGREE on the cause or solution
+- Where state media, government-aligned outlets, or nationalist framing colors the story
+- Surprising or underreported angles from smaller or non-Western sources
+- What each country's coverage OMITS or downplays that others highlight
 
 Produce a JSON object (no markdown, no code fences, raw JSON only) that follows this EXACT schema:
 
@@ -88,7 +121,7 @@ Produce a JSON object (no markdown, no code fences, raw JSON only) that follows 
   "narration_segments": [
     {{
       "type": "overview",
-      "text": "Opening narration: introduce the topic globally, ~{words_per_segment} words. Cite key facts.",
+      "text": "Opening narration: introduce the topic globally, ~{words_per_segment} words. Note the diversity of perspectives.",
       "visual": "overview_infographic"
     }},
     // For EACH article, one source_scroll segment:
@@ -96,18 +129,18 @@ Produce a JSON object (no markdown, no code fences, raw JSON only) that follows 
       "type": "source_scroll",
       "country": "COUNTRY_CODE_UPPERCASE",
       "url": "THE_ARTICLE_URL",
-      "text": "~{words_per_segment} words narrating this country's angle, perspective, or reaction."
+      "text": "~{words_per_segment} words narrating this country's angle, perspective, or reaction. If the article is not in English, translate its key points. Note the outlet type (state media, independent, tabloid, etc.) if relevant."
     }},
-    // One comparison segment:
+    // One comparison segment — this is the CORE of the broadcast:
     {{
       "type": "comparison",
-      "text": "~{words_per_segment} words comparing the different national perspectives. Note agreements and disagreements.",
+      "text": "~{words_per_segment} words. EXPLICITLY call out: (1) where countries agree, (2) where they sharply differ, (3) any potential state-media bias or framing, (4) what certain countries emphasize that others ignore.",
       "visual": "comparison_chart"
     }},
     // One timeline/background segment:
     {{
       "type": "timeline",
-      "text": "~{words_per_segment} words of historical context and background. Key dates and developments.",
+      "text": "~{words_per_segment} words of historical context. How did we get here? Key dates, turning points, and shifts in global opinion.",
       "visual": "timeline_infographic"
     }},
     // Closing segment:
@@ -115,6 +148,14 @@ Produce a JSON object (no markdown, no code fences, raw JSON only) that follows 
       "type": "closing",
       "text": "~30 words closing statement. What to watch for. Reporting for NewscastAI Global Desk.",
       "visual": "overview_infographic"
+    }}
+  ],
+  "perspective_differences": [
+    // 3-5 concrete examples of where country perspectives DIVERGE
+    {{
+      "aspect": "Brief topic (e.g. 'Cause of conflict')",
+      "description": "One sentence explaining the divergence",
+      "countries_involved": ["US", "CN", "RU"]
     }}
   ],
   "chart_data": {{
@@ -127,23 +168,25 @@ Produce a JSON object (no markdown, no code fences, raw JSON only) that follows 
       {{"year": "YYYY", "event": "Short description"}}
     ],
     "comparison_table": [
-      // 3-5 aspects comparing countries
+      // 3-5 aspects comparing countries — use actual country codes from the articles
       {{"aspect": "Government position", "us": "...", "uk": "...", "cn": "..."}}
     ]
   }},
   "key_facts": ["Fact 1", "Fact 2", "Fact 3"],
-  "lower_third_title": "{category.upper()} — GLOBAL COVERAGE",
+  "lower_third_title": "{category.upper()} — GLOBAL PERSPECTIVES",
   "lower_third_name": "NewscastAI Global Desk"
 }}
 
 Rules:
 - Raw JSON only. No markdown. No code fences. No explanation.
-- narration text must be plain spoken English, no markdown formatting.
-- Each narration_segments[].text must be complete sentences suitable for text-to-speech.
+- ALL narration text must be in plain spoken English suitable for text-to-speech (no markdown, no symbols).
+- Translate any non-English source material — preserve the original framing, do not neutralize it.
+- Each narration_segments[].text must be complete sentences.
 - Include one source_scroll segment per article provided above.
 - Fill comparison_table with the country codes that actually appear in the articles.
 - timeline_events: real, verifiable dates. If unsure, use approximate years.
 - sentiment: your assessment of each country's media coverage tone.
+- perspective_differences: must highlight real, substantive differences — not trivial ones.
 """
     return prompt
 
@@ -188,6 +231,7 @@ def _validate_and_fix(data: dict, articles: list[dict]) -> dict:
     data.setdefault("narration_segments", [])
     data.setdefault("chart_data", {})
     data.setdefault("key_facts", [])
+    data.setdefault("perspective_differences", [])
     data.setdefault("lower_third_title", "GLOBAL NEWS")
     data.setdefault("lower_third_name", "NewscastAI Global Desk")
 
